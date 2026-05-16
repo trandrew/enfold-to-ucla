@@ -100,6 +100,12 @@ class ETU_Layout_Converter {
 				return $this->map_table_node( $node, $summary );
 			case 'av_hr':
 				return $this->map_separator_node( $node, $summary );
+			case 'av_slideshow':
+			case 'av_slideshow_full':
+				return $this->map_slideshow_node( $node, $summary );
+			case 'av_slide':
+			case 'av_slide_full':
+				return $this->map_slide_node( $node, $summary );
 			case 'av_section':
 				$class_name  = trim( 'ucla-section ' . $this->map_section_utilities( $attrs ) );
 				$target_name = 'core/group';
@@ -354,6 +360,193 @@ class ETU_Layout_Converter {
 			'attributes' => array(
 				'className' => 'ucla-section',
 			),
+			'innerBlocks' => $inner_blocks,
+		);
+	}
+
+	/**
+	 * @param array<string, mixed> $node av_slideshow / av_slideshow_full node.
+	 * @param array<int, array<string, mixed>> $summary Summary accumulator.
+	 * @return array<string, mixed>
+	 */
+	private function map_slideshow_node( $node, &$summary ) {
+		$tag      = (string) $node['tag'];
+		$attrs    = isset( $node['attrs'] ) && is_array( $node['attrs'] ) ? $node['attrs'] : array();
+		$children = isset( $node['children'] ) && is_array( $node['children'] ) ? $node['children'] : array();
+
+		$slide_tags = array( 'av_slide', 'av_slide_full' );
+		$slides     = array();
+		foreach ( $children as $child ) {
+			if (
+				isset( $child['type'], $child['tag'] ) &&
+				'shortcode' === $child['type'] &&
+				in_array( strtolower( (string) $child['tag'] ), $slide_tags, true )
+			) {
+				$slide = $this->map_slide_node( $child, $summary );
+				if ( ! empty( $slide ) ) {
+					$slides[] = $slide;
+				}
+			}
+		}
+
+		$carousel_attrs = array( 'perPage' => 1 );
+		$attrs_mapped   = array();
+		$warnings       = array();
+
+		if ( isset( $attrs['autoplay'] ) && 'true' === strtolower( $attrs['autoplay'] ) ) {
+			$carousel_attrs['enableAutoPlay'] = true;
+			$attrs_mapped['autoplay']         = $attrs['autoplay'];
+		}
+
+		if ( isset( $attrs['interval'] ) && is_numeric( $attrs['interval'] ) ) {
+			$carousel_attrs['autoPlayDelay'] = (int) round( (float) $attrs['interval'] * 1000 );
+			$attrs_mapped['interval']        = $attrs['interval'];
+		}
+
+		foreach ( array( 'animation', 'size', 'stretch', 'control_layout', 'transition_speed' ) as $unmapped_attr ) {
+			if ( ! empty( $attrs[ $unmapped_attr ] ) ) {
+				$warnings[] = 'attr-not-mapped: ' . $unmapped_attr;
+			}
+		}
+
+		$summary[] = array(
+			'sourceShortcode'      => $tag,
+			'targetType'           => 'ucla-block',
+			'targetName'           => 'ucla-wordpress-plugin/carousel',
+			'attributesMapped'     => $attrs_mapped,
+			'warnings'             => $warnings,
+			'requiresManualReview' => ! empty( $warnings ),
+		);
+
+		return array(
+			'name'        => 'ucla-wordpress-plugin/carousel',
+			'attributes'  => $carousel_attrs,
+			'innerBlocks' => $slides,
+		);
+	}
+
+	/**
+	 * @param array<string, mixed> $node av_slide / av_slide_full node.
+	 * @param array<int, array<string, mixed>> $summary Summary accumulator.
+	 * @return array<string, mixed>
+	 */
+	private function map_slide_node( $node, &$summary ) {
+		$tag   = (string) $node['tag'];
+		$attrs = isset( $node['attrs'] ) && is_array( $node['attrs'] ) ? $node['attrs'] : array();
+
+		$inner_blocks = array();
+		$attrs_mapped = array();
+		$warnings     = array();
+
+		$slide_type = isset( $attrs['slide_type'] ) ? strtolower( trim( $attrs['slide_type'] ) ) : '';
+		if ( 'video' === $slide_type ) {
+			$warnings[] = 'video-slide-not-supported';
+		}
+
+		// Image
+		if ( isset( $attrs['id'] ) && '' !== $attrs['id'] && is_numeric( $attrs['id'] ) ) {
+			$image_attrs = array( 'id' => (int) $attrs['id'] );
+			if ( ! empty( $attrs['attachment'] ) ) {
+				$image_attrs['url'] = esc_url_raw( $attrs['attachment'] );
+			}
+			$inner_blocks[]    = array(
+				'name'        => 'core/image',
+				'attributes'  => $image_attrs,
+				'innerBlocks' => array(),
+			);
+			$attrs_mapped['id'] = $attrs['id'];
+		}
+
+		// Caption title → heading
+		if ( isset( $attrs['title'] ) && '' !== trim( $attrs['title'] ) ) {
+			$inner_blocks[]         = array(
+				'name'        => 'core/heading',
+				'attributes'  => array(
+					'content' => wp_kses_post( $attrs['title'] ),
+					'level'   => 3,
+				),
+				'innerBlocks' => array(),
+			);
+			$attrs_mapped['title'] = $attrs['title'];
+		}
+
+		// Caption text → paragraph
+		if ( isset( $attrs['content'] ) && '' !== trim( $attrs['content'] ) ) {
+			$inner_blocks[]           = array(
+				'name'        => 'core/paragraph',
+				'attributes'  => array(
+					'content' => wp_kses_post( $attrs['content'] ),
+				),
+				'innerBlocks' => array(),
+			);
+			$attrs_mapped['content'] = $attrs['content'];
+		}
+
+		// CTA button 1
+		if ( ! empty( $attrs['link1'] ) ) {
+			$btn_attrs = array(
+				'url'  => esc_url_raw( $attrs['link1'] ),
+				'text' => ! empty( $attrs['button_label'] ) ? sanitize_text_field( $attrs['button_label'] ) : '',
+			);
+			if ( isset( $attrs['link_target1'] ) && '_blank' === $attrs['link_target1'] ) {
+				$btn_attrs['linkTarget'] = '_blank';
+				$btn_attrs['rel']        = 'noreferrer noopener';
+			}
+			$inner_blocks[]               = array(
+				'name'        => 'core/button',
+				'attributes'  => $btn_attrs,
+				'innerBlocks' => array(),
+			);
+			$attrs_mapped['link1']        = $attrs['link1'];
+			$attrs_mapped['button_label'] = $attrs['button_label'] ?? '';
+		}
+
+		// CTA button 2
+		if ( ! empty( $attrs['link2'] ) && ! empty( $attrs['button_label2'] ) ) {
+			$btn2_attrs = array(
+				'url'  => esc_url_raw( $attrs['link2'] ),
+				'text' => sanitize_text_field( $attrs['button_label2'] ),
+			);
+			if ( isset( $attrs['link_target2'] ) && '_blank' === $attrs['link_target2'] ) {
+				$btn2_attrs['linkTarget'] = '_blank';
+				$btn2_attrs['rel']        = 'noreferrer noopener';
+			}
+			$inner_blocks[]                = array(
+				'name'        => 'core/button',
+				'attributes'  => $btn2_attrs,
+				'innerBlocks' => array(),
+			);
+			$attrs_mapped['link2']         = $attrs['link2'];
+			$attrs_mapped['button_label2'] = $attrs['button_label2'];
+		}
+
+		// Whole-slide link has no direct equivalent in carousel-slide
+		if ( ! empty( $attrs['link'] ) ) {
+			$warnings[] = 'attr-not-mapped: link (whole-slide link — add manually)';
+		}
+
+		foreach ( array( 'position', 'caption_pos', 'font_color', 'overlay_color', 'overlay_opacity' ) as $unmapped_attr ) {
+			if ( ! empty( $attrs[ $unmapped_attr ] ) ) {
+				$warnings[] = 'attr-not-mapped: ' . $unmapped_attr;
+			}
+		}
+
+		$summary[] = array(
+			'sourceShortcode'      => $tag,
+			'targetType'           => 'ucla-block',
+			'targetName'           => 'ucla-wordpress-plugin/carousel-slide',
+			'attributesMapped'     => $attrs_mapped,
+			'warnings'             => $warnings,
+			'requiresManualReview' => ! empty( $warnings ),
+		);
+
+		if ( empty( $inner_blocks ) ) {
+			return array();
+		}
+
+		return array(
+			'name'        => 'ucla-wordpress-plugin/carousel-slide',
+			'attributes'  => array(),
 			'innerBlocks' => $inner_blocks,
 		);
 	}
