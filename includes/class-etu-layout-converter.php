@@ -611,29 +611,110 @@ class ETU_Layout_Converter {
 	 * @return array<string, mixed>
 	 */
 	private function map_table_node( $node, &$summary ) {
+		$attrs    = isset( $node['attrs'] ) && is_array( $node['attrs'] ) ? $node['attrs'] : array();
 		$children = isset( $node['children'] ) && is_array( $node['children'] ) ? $node['children'] : array();
-		$content  = trim( $this->extract_text_content( $children ) );
 
-		if ( '' === $content ) {
-			return array();
+		// Collect av_row children; av_table always uses these for tabular data
+		$row_nodes = array();
+		foreach ( $children as $child ) {
+			if ( isset( $child['type'], $child['tag'] ) && 'shortcode' === $child['type'] && 'av_row' === strtolower( (string) $child['tag'] ) ) {
+				$row_nodes[] = $child;
+			}
 		}
 
-		$content = $this->normalize_ucla_table_markup( $content );
+		// Fallback: no av_row children means raw HTML was somehow nested — wrap as-is
+		if ( empty( $row_nodes ) ) {
+			$content = trim( $this->extract_text_content( $children ) );
+			if ( '' === $content ) {
+				return array();
+			}
+			$content   = $this->normalize_ucla_table_markup( $content );
+			$summary[] = array(
+				'sourceShortcode'      => 'av_table',
+				'targetType'           => 'html-wrapper',
+				'targetName'           => 'core/html',
+				'attributesMapped'     => array(),
+				'warnings'             => array( 'no av_row children found — converted to raw HTML' ),
+				'requiresManualReview' => true,
+			);
+			return array(
+				'name'        => 'core/html',
+				'attributes'  => array( 'content' => $content ),
+				'innerBlocks' => array(),
+			);
+		}
+
+		// Build head / body from av_row nodes
+		// Mirrors Enfold's own tag logic: avia-heading-row → th, avia-desc-col → th, else td
+		$head_rows = array();
+		$body_rows = array();
+
+		foreach ( $row_nodes as $row_node ) {
+			$row_attrs  = isset( $row_node['attrs'] ) && is_array( $row_node['attrs'] ) ? $row_node['attrs'] : array();
+			$row_style  = $row_attrs['row_style'] ?? '';
+			$is_heading = 'avia-heading-row' === $row_style;
+
+			$cells         = array();
+			$cell_children = isset( $row_node['children'] ) && is_array( $row_node['children'] ) ? $row_node['children'] : array();
+
+			foreach ( $cell_children as $cell_node ) {
+				if ( ! isset( $cell_node['type'], $cell_node['tag'] ) || 'shortcode' !== $cell_node['type'] || 'av_cell' !== strtolower( (string) $cell_node['tag'] ) ) {
+					continue;
+				}
+				$cell_attrs = isset( $cell_node['attrs'] ) && is_array( $cell_node['attrs'] ) ? $cell_node['attrs'] : array();
+				$col_style  = $cell_attrs['col_style'] ?? '';
+				$text_nodes = isset( $cell_node['children'] ) && is_array( $cell_node['children'] ) ? $cell_node['children'] : array();
+				$content    = wp_kses_post( trim( $this->extract_text_content( $text_nodes ) ) );
+
+				$tag = ( $is_heading || 'avia-desc-col' === $col_style ) ? 'th' : 'td';
+
+				$cells[] = array(
+					'content' => $content,
+					'tag'     => $tag,
+				);
+			}
+
+			if ( empty( $cells ) ) {
+				continue;
+			}
+
+			$row = array( 'cells' => $cells );
+			if ( $is_heading ) {
+				$head_rows[] = $row;
+			} else {
+				$body_rows[] = $row;
+			}
+		}
+
+		$caption       = ! empty( $attrs['caption'] ) ? sanitize_text_field( $attrs['caption'] ) : '';
+		$is_responsive = ! empty( $attrs['responsive_styling'] ) && false !== strpos( $attrs['responsive_styling'], 'avia_responsive' );
 
 		$summary[] = array(
 			'sourceShortcode'      => 'av_table',
 			'targetType'           => 'core-block',
-			'targetName'           => 'core/html (ucla-table)',
-			'attributesMapped'     => array(),
+			'targetName'           => 'core/table',
+			'attributesMapped'     => array_filter( array(
+				'caption'            => $caption,
+				'responsive_styling' => $attrs['responsive_styling'] ?? '',
+			) ),
 			'warnings'             => array(),
 			'requiresManualReview' => false,
 		);
 
+		$table_attrs = array(
+			'head'    => $head_rows,
+			'body'    => $body_rows,
+			'foot'    => array(),
+			'caption' => $caption,
+		);
+
+		if ( $is_responsive ) {
+			$table_attrs['tableResponsive'] = true;
+		}
+
 		return array(
-			'name'       => 'core/html',
-			'attributes' => array(
-				'content' => $content,
-			),
+			'name'        => 'core/table',
+			'attributes'  => $table_attrs,
 			'innerBlocks' => array(),
 		);
 	}
