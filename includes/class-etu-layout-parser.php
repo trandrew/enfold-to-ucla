@@ -169,6 +169,7 @@ class ETU_Layout_Parser {
 			strtolower( $tag ),
 			array(
 				'av_hr',
+				'av_team_member', // all data in attrs; closing tag often absent in real content
 			),
 			true
 		);

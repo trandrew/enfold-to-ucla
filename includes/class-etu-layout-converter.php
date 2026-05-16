@@ -102,6 +102,8 @@ class ETU_Layout_Converter {
 				return $this->map_separator_node( $node, $summary );
 			case 'av_image':
 				return $this->map_image_node( $node, $summary );
+			case 'av_team_member':
+				return $this->map_team_member_node( $node, $summary );
 			case 'av_slideshow':
 			case 'av_slideshow_full':
 				return $this->map_slideshow_node( $node, $summary );
@@ -362,6 +364,114 @@ class ETU_Layout_Converter {
 			'attributes' => array(
 				'className' => 'ucla-section',
 			),
+			'innerBlocks' => $inner_blocks,
+		);
+	}
+
+	/**
+	 * @param array<string, mixed> $node av_team_member node.
+	 * @param array<int, array<string, mixed>> $summary Summary accumulator.
+	 * @return array<string, mixed>
+	 */
+	private function map_team_member_node( $node, &$summary ) {
+		$attrs = isset( $node['attrs'] ) && is_array( $node['attrs'] ) ? $node['attrs'] : array();
+
+		$block_attrs  = array();
+		$attrs_mapped = array();
+		$warnings     = array();
+		$inner_blocks = array();
+
+		// Image
+		$src  = trim( $attrs['src'] ?? '' );
+		$name = trim( $attrs['name'] ?? '' );
+
+		if ( '' !== $src ) {
+			$block_attrs['mediaUrl'] = esc_url_raw( $src );
+			$attrs_mapped['src']     = $src;
+		} elseif ( ! empty( $attrs['attachment'] ) && is_numeric( $attrs['attachment'] ) ) {
+			$size    = ! empty( $attrs['attachment_size'] ) ? sanitize_key( $attrs['attachment_size'] ) : 'medium';
+			$img_src = wp_get_attachment_image_src( (int) $attrs['attachment'], $size );
+			if ( $img_src ) {
+				$block_attrs['mediaUrl'] = $img_src[0];
+			}
+		}
+
+		if ( ! empty( $attrs['attachment'] ) && is_numeric( $attrs['attachment'] ) ) {
+			$block_attrs['mediaId']  = (int) $attrs['attachment'];
+			$attrs_mapped['attachment'] = $attrs['attachment'];
+		}
+
+		// Use the person's name as image alt text
+		if ( '' !== $name ) {
+			$block_attrs['mediaAlt'] = sanitize_text_field( $name );
+		}
+
+		// Link
+		$website = trim( $attrs['website'] ?? '' );
+		if ( '' !== $website && 'http://' !== $website && 'https://' !== $website ) {
+			$block_attrs['url'] = esc_url_raw( $website );
+			$attrs_mapped['website'] = $website;
+		}
+
+		// Inner blocks: name → title heading
+		if ( '' !== $name ) {
+			$inner_blocks[] = array(
+				'name'        => 'core/heading',
+				'attributes'  => array(
+					'className' => 'ucla-card__title',
+					'content'   => sanitize_text_field( $name ),
+					'level'     => 3,
+				),
+				'innerBlocks' => array(),
+			);
+			$attrs_mapped['name'] = $name;
+		}
+
+		// job → department/title heading
+		$job = trim( $attrs['job'] ?? '' );
+		if ( '' !== $job ) {
+			$inner_blocks[] = array(
+				'name'        => 'core/heading',
+				'attributes'  => array(
+					'className' => 'ucla-card__person-department',
+					'content'   => sanitize_text_field( $job ),
+					'level'     => 4,
+				),
+				'innerBlocks' => array(),
+			);
+			$attrs_mapped['job'] = $job;
+		}
+
+		// description → paragraph
+		$description = trim( $attrs['description'] ?? '' );
+		if ( '' !== $description ) {
+			$inner_blocks[] = array(
+				'name'        => 'core/paragraph',
+				'attributes'  => array(
+					'className' => 'ucla-card__description',
+					'content'   => wp_kses_post( $description ),
+				),
+				'innerBlocks' => array(),
+			);
+			$attrs_mapped['description'] = $description;
+		}
+
+		if ( ! empty( $attrs['custom_class'] ) ) {
+			$warnings[] = 'attr-not-mapped: custom_class';
+		}
+
+		$summary[] = array(
+			'sourceShortcode'      => 'av_team_member',
+			'targetType'           => 'ucla-block',
+			'targetName'           => 'ucla-wordpress-plugin/card-people',
+			'attributesMapped'     => $attrs_mapped,
+			'warnings'             => $warnings,
+			'requiresManualReview' => ! empty( $warnings ),
+		);
+
+		return array(
+			'name'        => 'ucla-wordpress-plugin/card-people',
+			'attributes'  => $block_attrs,
 			'innerBlocks' => $inner_blocks,
 		);
 	}
