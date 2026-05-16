@@ -100,6 +100,8 @@ class ETU_Layout_Converter {
 				return $this->map_table_node( $node, $summary );
 			case 'av_hr':
 				return $this->map_separator_node( $node, $summary );
+			case 'av_image':
+				return $this->map_image_node( $node, $summary );
 			case 'av_slideshow':
 			case 'av_slideshow_full':
 				return $this->map_slideshow_node( $node, $summary );
@@ -361,6 +363,113 @@ class ETU_Layout_Converter {
 				'className' => 'ucla-section',
 			),
 			'innerBlocks' => $inner_blocks,
+		);
+	}
+
+	/**
+	 * @param array<string, mixed> $node av_image node.
+	 * @param array<int, array<string, mixed>> $summary Summary accumulator.
+	 * @return array<string, mixed>
+	 */
+	private function map_image_node( $node, &$summary ) {
+		$attrs    = isset( $node['attrs'] ) && is_array( $node['attrs'] ) ? $node['attrs'] : array();
+		$children = isset( $node['children'] ) && is_array( $node['children'] ) ? $node['children'] : array();
+
+		$image_attrs  = array();
+		$attrs_mapped = array();
+		$warnings     = array();
+
+		// URL — Enfold stores the sized URL in src; fall back to resolving from attachment ID
+		$src = trim( $attrs['src'] ?? '' );
+		if ( '' === $src && ! empty( $attrs['attachment'] ) && is_numeric( $attrs['attachment'] ) ) {
+			$size    = ! empty( $attrs['attachment_size'] ) ? sanitize_key( $attrs['attachment_size'] ) : 'full';
+			$img_src = wp_get_attachment_image_src( (int) $attrs['attachment'], $size );
+			$src     = $img_src ? $img_src[0] : '';
+		}
+
+		if ( '' === $src ) {
+			return array();
+		}
+
+		$image_attrs['url']  = esc_url_raw( $src );
+		$attrs_mapped['src'] = $src;
+
+		// Attachment ID
+		if ( ! empty( $attrs['attachment'] ) && is_numeric( $attrs['attachment'] ) ) {
+			$image_attrs['id']          = (int) $attrs['attachment'];
+			$attrs_mapped['attachment'] = $attrs['attachment'];
+		}
+
+		// Size slug
+		if ( ! empty( $attrs['attachment_size'] ) ) {
+			$image_attrs['sizeSlug']         = sanitize_key( $attrs['attachment_size'] );
+			$attrs_mapped['attachment_size'] = $attrs['attachment_size'];
+		}
+
+		// Alignment
+		$align = strtolower( trim( $attrs['align'] ?? '' ) );
+		if ( in_array( $align, array( 'left', 'center', 'right' ), true ) ) {
+			$image_attrs['align'] = $align;
+			$attrs_mapped['align'] = $align;
+		}
+
+		// Caption — `caption='yes'` is the flag; text is stored as the shortcode's inner content
+		if ( 'yes' === ( $attrs['caption'] ?? '' ) ) {
+			$caption_text = trim( $this->extract_text_content( $children ) );
+			if ( '' !== $caption_text ) {
+				$image_attrs['caption'] = wp_kses_post( $caption_text );
+				$attrs_mapped['caption'] = 'yes';
+			}
+			foreach ( array( 'overlay_opacity', 'overlay_color', 'overlay_text_color', 'font_size' ) as $overlay_attr ) {
+				if ( ! empty( $attrs[ $overlay_attr ] ) ) {
+					$warnings[] = 'attr-not-mapped: ' . $overlay_attr . ' (caption overlay)';
+				}
+			}
+		}
+
+		// Link — handle Enfold {type},{url} format and lightbox special value
+		$raw_link = trim( $attrs['link'] ?? '' );
+		if ( 'lightbox' === $raw_link ) {
+			$image_attrs['linkDestination'] = 'media';
+			$attrs_mapped['link']           = $raw_link;
+			$warnings[]                     = 'link=lightbox — converted to linkDestination=media, verify lightbox behaviour';
+		} elseif ( '' !== $raw_link ) {
+			$href = $this->parse_enfold_link( $raw_link );
+			if ( '' !== $href ) {
+				$image_attrs['href']            = $href;
+				$image_attrs['linkDestination'] = 'custom';
+				$attrs_mapped['link']           = $raw_link;
+				if ( '_blank' === ( $attrs['target'] ?? '' ) ) {
+					$image_attrs['linkTarget'] = '_blank';
+					$image_attrs['rel']        = 'noreferrer noopener';
+				}
+			}
+		}
+
+		// Visual effects that have no block equivalent
+		foreach ( array( 'hover', 'styling', 'appearance' ) as $fx_attr ) {
+			if ( ! empty( $attrs[ $fx_attr ] ) ) {
+				$warnings[] = 'attr-not-mapped: ' . $fx_attr;
+			}
+		}
+		$animation = $attrs['animation'] ?? '';
+		if ( '' !== $animation && 'no-animation' !== $animation ) {
+			$warnings[] = 'attr-not-mapped: animation';
+		}
+
+		$summary[] = array(
+			'sourceShortcode'      => 'av_image',
+			'targetType'           => 'core-block',
+			'targetName'           => 'core/image',
+			'attributesMapped'     => $attrs_mapped,
+			'warnings'             => $warnings,
+			'requiresManualReview' => ! empty( $warnings ),
+		);
+
+		return array(
+			'name'        => 'core/image',
+			'attributes'  => $image_attrs,
+			'innerBlocks' => array(),
 		);
 	}
 
