@@ -443,13 +443,15 @@ class ETU_Layout_Converter {
 			$warnings[] = 'video-slide-not-supported';
 		}
 
-		// Image
+		// Image — resolve URL from attachment ID since av_slide_full never stores it inline
 		if ( isset( $attrs['id'] ) && '' !== $attrs['id'] && is_numeric( $attrs['id'] ) ) {
-			$image_attrs = array( 'id' => (int) $attrs['id'] );
-			if ( ! empty( $attrs['attachment'] ) ) {
-				$image_attrs['url'] = esc_url_raw( $attrs['attachment'] );
+			$attachment_id = (int) $attrs['id'];
+			$image_attrs   = array( 'id' => $attachment_id );
+			$image_url     = wp_get_attachment_url( $attachment_id );
+			if ( $image_url ) {
+				$image_attrs['url'] = $image_url;
 			}
-			$inner_blocks[]    = array(
+			$inner_blocks[]     = array(
 				'name'        => 'core/image',
 				'attributes'  => $image_attrs,
 				'innerBlocks' => array(),
@@ -483,10 +485,12 @@ class ETU_Layout_Converter {
 		}
 
 		// CTA button 1
-		if ( ! empty( $attrs['link1'] ) ) {
+		$url1  = $this->parse_enfold_link( $attrs['link1'] ?? '' );
+		$label1 = sanitize_text_field( $attrs['button_label'] ?? '' );
+		if ( '' !== $url1 && '' !== $label1 ) {
 			$btn_attrs = array(
-				'url'  => esc_url_raw( $attrs['link1'] ),
-				'text' => ! empty( $attrs['button_label'] ) ? sanitize_text_field( $attrs['button_label'] ) : '',
+				'url'  => $url1,
+				'text' => $label1,
 			);
 			if ( isset( $attrs['link_target1'] ) && '_blank' === $attrs['link_target1'] ) {
 				$btn_attrs['linkTarget'] = '_blank';
@@ -502,10 +506,12 @@ class ETU_Layout_Converter {
 		}
 
 		// CTA button 2
-		if ( ! empty( $attrs['link2'] ) && ! empty( $attrs['button_label2'] ) ) {
+		$url2   = $this->parse_enfold_link( $attrs['link2'] ?? '' );
+		$label2 = sanitize_text_field( $attrs['button_label2'] ?? '' );
+		if ( '' !== $url2 && '' !== $label2 ) {
 			$btn2_attrs = array(
-				'url'  => esc_url_raw( $attrs['link2'] ),
-				'text' => sanitize_text_field( $attrs['button_label2'] ),
+				'url'  => $url2,
+				'text' => $label2,
 			);
 			if ( isset( $attrs['link_target2'] ) && '_blank' === $attrs['link_target2'] ) {
 				$btn2_attrs['linkTarget'] = '_blank';
@@ -799,6 +805,32 @@ class ETU_Layout_Converter {
 		}
 
 		return implode( ' ', $classes );
+	}
+
+	/**
+	 * Enfold stores links as "{type},{url}" (e.g. "manually,https://example.com").
+	 * Extracts the URL portion, returns empty string for placeholders like "manually,http://".
+	 *
+	 * @param string $raw Raw Enfold link value.
+	 * @return string Sanitized URL, or empty string if none.
+	 */
+	private function parse_enfold_link( $raw ) {
+		$raw = trim( $raw );
+		if ( '' === $raw ) {
+			return '';
+		}
+
+		// Strip the "{type}," prefix if present
+		$comma = strpos( $raw, ',' );
+		$url   = false !== $comma ? substr( $raw, $comma + 1 ) : $raw;
+		$url   = trim( $url );
+
+		// Reject bare protocol placeholders with no real URL
+		if ( '' === $url || 'http://' === $url || 'https://' === $url ) {
+			return '';
+		}
+
+		return esc_url_raw( $url );
 	}
 
 	/**
