@@ -5,7 +5,7 @@
  * Version: 0.1.0
  * Requires at least: 6.2
  * Requires PHP: 7.4
- * Author: UCLA Web Team
+ * Author: UCLA Life Sciences Computing
  * Text Domain: enfold-to-ucla
  * License: GPL-2.0-or-later
  */

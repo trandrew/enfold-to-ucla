@@ -106,9 +106,9 @@ class ETU_Layout_Converter {
 				break;
 			case 'av_row':
 			case 'av_flex_row':
-				$class_name  = 'ucla-grid';
-				$target_name = 'core/columns';
-				$inner_blocks = $this->map_row_columns( $children, $summary );
+				$class_name  = 'ucla-section';
+				$target_name = 'core/group';
+				$inner_blocks = $this->flatten_row_columns( $children, $summary );
 				break;
 			case 'av_one_full':
 				$class_name  = 'ucla-group-full';
@@ -227,6 +227,32 @@ class ETU_Layout_Converter {
 	}
 
 	/**
+	 * Extract and vertically stack the inner blocks from all column children of a row.
+	 *
+	 * @param array<int, array<string, mixed>> $children Children from row shortcode.
+	 * @param array<int, array<string, mixed>> $summary Summary by reference.
+	 * @return array<int, array<string, mixed>>
+	 */
+	private function flatten_row_columns( $children, &$summary ) {
+		$blocks = array();
+
+		foreach ( $children as $child ) {
+			if (
+				isset( $child['type'], $child['tag'] ) &&
+				'shortcode' === $child['type'] &&
+				$this->is_column_shortcode( (string) $child['tag'] )
+			) {
+				$col_children = isset( $child['children'] ) && is_array( $child['children'] ) ? $child['children'] : array();
+				$blocks       = array_merge( $blocks, $this->nodes_to_blocks( $col_children, $summary ) );
+			} else {
+				$blocks = array_merge( $blocks, $this->nodes_to_blocks( array( $child ), $summary ) );
+			}
+		}
+
+		return $blocks;
+	}
+
+	/**
 	 * Wrap root-level column blocks in a columns container.
 	 *
 	 * @param array<int, array<string, mixed>> $blocks Block list.
@@ -317,12 +343,18 @@ class ETU_Layout_Converter {
 	 * @return array<string, mixed>
 	 */
 	private function make_columns_block( $columns ) {
+		$inner_blocks = array();
+		foreach ( $columns as $column ) {
+			$col_inner    = isset( $column['innerBlocks'] ) && is_array( $column['innerBlocks'] ) ? $column['innerBlocks'] : array();
+			$inner_blocks = array_merge( $inner_blocks, $col_inner );
+		}
+
 		return array(
-			'name'       => 'core/columns',
+			'name'       => 'core/group',
 			'attributes' => array(
-				'className' => 'ucla-grid',
+				'className' => 'ucla-section',
 			),
-			'innerBlocks' => $columns,
+			'innerBlocks' => $inner_blocks,
 		);
 	}
 
